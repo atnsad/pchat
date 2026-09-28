@@ -3,92 +3,178 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>لایو ویس‌چت</title>
-  <script src="https://meet.jit.si/external_api.js"></script>
+  <title>لایو ویس‌چت دست‌ساز</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #0f172a;
-      color: #f8fafc;
-      font-family: system-ui, -apple-system, sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 100vh;
-      padding: 16px;
-    }
-    .top-bar {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-      width: min(900px, 100%);
-    }
-    input {
-      flex: 1;
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #fff;
-      font-size: 14px;
-    }
-    button {
-      padding: 10px 18px;
-      border-radius: 8px;
-      border: none;
-      background: #2563eb;
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button:hover { background: #1d4ed8; }
-    #meet {
-      width: min(900px, 100%);
-      height: 75vh;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #1e293b;
-      border: 1px solid #334155;
-    }
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #0f172a; color: #f8fafc; padding: 20px; }
+    .card { max-width: 480px; margin: 40px auto; background: #1e293b; padding: 24px; border-radius: 12px; border: 1px solid #334155; }
+    input, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; font-size: 15px; }
+    button { cursor: pointer; font-weight: bold; }
+    button.primary { background: #2563eb; border: none; }
+    button.danger { background: #dc2626; border: none; }
+    .users-box { margin-top: 20px; background: #0f172a; border-radius: 8px; padding: 12px; }
+    .user-item { padding: 8px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; font-size: 14px; }
+    .badge { background: #10b981; color: black; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; }
   </style>
 </head>
 <body>
 
-  <div class="top-bar">
-    <input id="roomName" placeholder="نام اتاق صوتی (مثلاً: game-room-1)" value="my-chat-room">
-    <button onclick="joinVoice()">ورود به ویس</button>
+<div class="card">
+  <h2>🎙 ویس‌چت اختصاصی P2P</h2>
+
+  <div id="join-view">
+    <input id="username" placeholder="نام کاربری شما" value="کاربر">
+    <input id="room" placeholder="نام اتاق" value="room1">
+    <button class="primary" onclick="joinRoom()">ورود به ویس‌چت</button>
   </div>
 
-  <div id="meet"></div>
+  <div id="call-view" style="display: none;">
+    <div style="color: #38bdf8; font-size: 14px;" id="roomInfo"></div>
+    <button id="muteBtn" onclick="toggleMute()">قطع میکروفون</button>
+    <button class="danger" onclick="leaveRoom()">خروج</button>
 
-  <script>
-    let api = null;
+    <div class="users-box">
+      <div style="color: #94a3b8; font-size: 13px; margin-bottom: 8px;">افراد متصل:</div>
+      <div id="peersList"></div>
+    </div>
+  </div>
+</div>
 
-    function joinVoice() {
-      const room = document.getElementById("roomName").value.trim();
-      if (!room) return alert("نام اتاق را وارد کن");
+<div id="audio-container"></div>
 
-      if (api) api.dispose();
+<script>
+  // آدرس دقیق ورکر خودت
+  const WORKER_URL = "https://pchat-db.abtin-sad1393.workers.dev";
 
-      const domain = "meet.jit.si";
-      const options = {
-        roomName: "pchat-" + room,
-        width: "100%",
-        height: "100%",
-        parentNode: document.querySelector('#meet'),
-        configOverwrite: {
-          startWithAudioMuted: false,
-          startWithVideoMuted: true, // فقط ویس، تصویر خاموش
-          prejoinPageEnabled: false
-        },
-        interfaceConfigOverwrite: {
-          TOOLBAR_BUTTONS: ['microphone', 'hangup', 'tileview']
-        }
-      };
+  let myPeer = null;
+  let myPeerId = null;
+  let localStream = null;
+  let currentRoom = "";
+  let currentNick = "";
+  let isMuted = false;
+  let pingTimer = null;
+  let pollTimer = null;
+  const connectedCalls = new Map();
 
-      api = new JitsiMeetExternalAPI(domain, options);
+  async function joinRoom() {
+    currentNick = document.getElementById("username").value.trim();
+    currentRoom = document.getElementById("room").value.trim();
+    if (!currentNick || !currentRoom) return alert("اطلاعات را کامل وارد کن.");
+
+    try {
+      // 1. دریافت صدای میکروفون
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: false
+      });
+
+      // 2. ساخت ID یکتا در شبکه WebRTC
+      myPeerId = "user_" + Math.random().toString(36).substring(2, 9);
+      myPeer = new Peer(myPeerId);
+
+      myPeer.on('open', (id) => {
+        document.getElementById("join-view").style.display = "none";
+        document.getElementById("call-view").style.display = "block";
+        document.getElementById("roomInfo").textContent = `متصل به اتاق: ${currentRoom}`;
+
+        // پاسخ‌دادن به تماس دیگران
+        myPeer.on('call', (call) => {
+          call.answer(localStream);
+          listenToCall(call);
+        });
+
+        // شروع پینگ به کلودفلر و بررسی کاربران حاضر
+        startSync();
+      });
+
+    } catch (err) {
+      alert("خطا در دسترسی به میکروفون (حتماً باید صفحه HTTPS باشد): " + err.message);
     }
-  </script>
+  }
+
+  function startSync() {
+    sendPing();
+    pingTimer = setInterval(sendPing, 4000); // هر 4 ثانیه اعلام حضور به D1
+    pollTimer = setInterval(discoverPeers, 3000); // هر 3 ثانیه چک کردن هم‌اتاقی‌ها
+  }
+
+  async function sendPing() {
+    await fetch(`${WORKER_URL}/api/voice/ping`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: currentRoom, username: currentNick, peerId: myPeerId })
+    });
+  }
+
+  async function discoverPeers() {
+    try {
+      const res = await fetch(`${WORKER_URL}/api/voice/peers?room=${encodeURIComponent(currentRoom)}`);
+      const users = await res.json();
+
+      const listDiv = document.getElementById("peersList");
+      listDiv.innerHTML = "";
+
+      users.forEach(user => {
+        const item = document.createElement("div");
+        item.className = "user-item";
+        item.innerHTML = `<span>${user.username}</span> ${user.peer_id === myPeerId ? '<span class="badge">شما</span>' : '<span style="color:#94a3b8; font-size:12px;">صدا فعال</span>'}`;
+        listDiv.appendChild(item);
+
+        // اگر کاربر جدیدی آمده و بهش زنگ نزدیم، مستقیم تماس WebRTC برقرار کن
+        if (user.peer_id !== myPeerId && !connectedCalls.has(user.peer_id)) {
+          const call = myPeer.call(user.peer_id, localStream);
+          listenToCall(call);
+        }
+      });
+    } catch (e) {
+      console.error("Discovery error:", e);
+    }
+  }
+
+  function listenToCall(call) {
+    connectedCalls.set(call.peer, call);
+
+    call.on('stream', (remoteStream) => {
+      let audio = document.getElementById(`audio_${call.peer}`);
+      if (!audio) {
+        audio = document.createElement("audio");
+        audio.id = `audio_${call.peer}`;
+        audio.autoplay = true;
+        document.getElementById("audio-container").appendChild(audio);
+      }
+      audio.srcObject = remoteStream;
+    });
+
+    call.on('close', () => {
+      document.getElementById(`audio_${call.peer}`)?.remove();
+      connectedCalls.delete(call.peer);
+    });
+  }
+
+  function toggleMute() {
+    if (!localStream) return;
+    isMuted = !isMuted;
+    localStream.getAudioTracks()[0].enabled = !isMuted;
+    const btn = document.getElementById("muteBtn");
+    btn.textContent = isMuted ? "وصل کردن میکروفون" : "قطع میکروفون";
+    btn.style.background = isMuted ? "#b91c1c" : "#0f172a";
+  }
+
+  async function leaveRoom() {
+    clearInterval(pingTimer);
+    clearInterval(pollTimer);
+    
+    await fetch(`${WORKER_URL}/api/voice/leave`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: currentRoom, peerId: myPeerId })
+    });
+
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+    if (myPeer) myPeer.destroy();
+    location.reload();
+  }
+</script>
 </body>
 </html>
