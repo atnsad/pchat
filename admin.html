@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Panel - Chat</title>
+  <style>
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto}
+    body{margin:0;background:#0b1220;color:#e5e7eb}
+    header{position:sticky;top:0;background:#0b1220;border-bottom:1px solid #1f2937;padding:14px 16px;z-index:10}
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    input,button,textarea{
+      background:#111827;border:1px solid #374151;color:#e5e7eb;
+      padding:10px 12px;border-radius:10px;outline:none
+    }
+    button{cursor:pointer}
+    button.primary{background:#2563eb;border-color:#2563eb}
+    button.danger{background:#dc2626;border-color:#dc2626}
+    button.ghost{background:transparent}
+    textarea{width:100%;min-height:90px;resize:vertical}
+    .card{background:#0f172a;border:1px solid #1f2937;border-radius:14px;padding:14px}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media (min-width: 960px){ .grid{grid-template-columns: 380px 1fr} }
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #1f2937;padding:10px;text-align:right;vertical-align:top}
+    th{color:#9ca3af;font-weight:600;font-size:13px}
+    td{font-size:13px}
+    .muted{color:#9ca3af;font-size:12px}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #334155;border-radius:999px;color:#cbd5e1;font-size:12px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .ok{color:#86efac}
+    .bad{color:#fca5a5}
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap row" style="align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-weight:800">پنل ادمین چت</div>
+      <div class="muted">Manage: list/search/edit/delete/clear/export</div>
+    </div>
+    <div class="row" style="align-items:center">
+      <span id="status" class="pill">offline</span>
+      <button class="ghost" onclick="logout()">خروج</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap grid">
+
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:8px">اتصال</div>
+    <div class="row">
+      <input id="api" style="flex:1" placeholder="Worker API URL" />
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="token" style="flex:1" placeholder="ADMIN TOKEN" type="password" />
+      <button class="primary" onclick="saveAuth()">ذخیره</button>
+    </div>
+    <div class="muted" style="margin-top:8px">توکن فقط روی همین مرورگر ذخیره می‌شود (localStorage).</div>
+
+    <hr style="border:none;border-top:1px solid #1f2937;margin:14px 0">
+
+    <div style="font-weight:700;margin-bottom:8px">فیلترها</div>
+    <div class="row">
+      <input id="room" placeholder="room (خالی=همه)" style="flex:1" />
+      <input id="q" placeholder="جستجو در username/text" style="flex:1" />
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="from" type="datetime-local" style="flex:1" />
+      <input id="to" type="datetime-local" style="flex:1" />
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="limit" type="number" min="1" max="200" value="50" style="width:120px" />
+      <input id="offset" type="number" min="0" value="0" style="width:120px" />
+      <button onclick="loadMessages()">بارگذاری</button>
+      <button onclick="loadStats()">آمار</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #1f2937;margin:14px 0">
+
+    <div style="font-weight:700;margin-bottom:8px">افزودن پیام (ادمین)</div>
+    <div class="row">
+      <input id="addRoom" placeholder="room" style="flex:1" />
+      <input id="addUser" placeholder="username" style="flex:1" />
+    </div>
+    <div style="margin-top:8px">
+      <textarea id="addText" placeholder="متن پیام..."></textarea>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="adminAdd()">افزودن</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #1f2937;margin:14px 0">
+
+    <div style="font-weight:700;margin-bottom:8px">پاکسازی اتاق</div>
+    <div class="row">
+      <input id="clearRoom" placeholder="room برای پاکسازی" style="flex:1" />
+      <button class="danger" onclick="adminClearRoom()">پاکسازی کامل اتاق</button>
+    </div>
+    <div class="muted" style="margin-top:8px">هشدار: این کار برگشت ندارد.</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:700">پیام‌ها</div>
+        <div id="meta" class="muted">—</div>
+      </div>
+      <div class="row">
+        <button onclick="exportJSON()">Export JSON</button>
+      </div>
+    </div>
+
+    <div id="stats" class="muted" style="margin:10px 0"></div>
+
+    <div style="overflow:auto;border:1px solid #1f2937;border-radius:12px">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:70px">ID</th>
+            <th style="width:120px">Room</th>
+            <th style="width:160px">User</th>
+            <th>Text</th>
+            <th style="width:170px">Time</th>
+            <th style="width:220px">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  // اینو با آدرس Worker خودت عوض کن
+  const DEFAULT_API = "https://YOUR-WORKER.your-subdomain.workers.dev";
+
+  function getAuth() {
+    return {
+      api: localStorage.getItem("admin_api") || DEFAULT_API,
+      token: localStorage.getItem("admin_token") || "",
+    };
+  }
+
+  function setStatus(ok, text) {
+    const el = $("status");
+    el.textContent = text;
+    el.className = "pill " + (ok ? "ok" : "bad");
+  }
+
+  async function apiFetch(path, options = {}) {
+    const { api, token } = getAuth();
+
+    const headers = options.headers || {};
+    headers["Content-Type"] = "application/json";
+    headers["Authorization"] = "Bearer " + token;
+
+    const res = await fetch(api + path, { ...options, headers });
+    const txt = await res.text();
+    let data;
+    try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+
+    if (!res.ok) throw new Error(data?.error || ("HTTP " + res.status));
+    return data;
+  }
+
+  function saveAuth() {
+    localStorage.setItem("admin_api", $("api").value.trim() || DEFAULT_API);
+    localStorage.setItem("admin_token", $("token").value.trim());
+    setStatus(!!$("token").value.trim(), $("token").value.trim() ? "online" : "token?");
+  }
+
+  function logout() {
+    localStorage.removeItem("admin_token");
+    $("token").value = "";
+    setStatus(false, "offline");
+  }
+
+  let lastLoaded = [];
+
+  function toISO(dtLocal) {
+    if (!dtLocal) return "";
+    const d = new Date(dtLocal);
+    return d.toISOString();
+  }
+
+  async function loadMessages() {
+    try {
+      const room = $("room").value.trim();
+      const q = $("q").value.trim();
+      const from = toISO($("from").value);
+      const to = toISO($("to").value);
+      const limit = parseInt($("limit").value || "50", 10);
+      const offset = parseInt($("offset").value || "0", 10);
+
+      const params = new URLSearchParams();
+      if (room) params.set("room", room);
+      if (q) params.set("q", q);
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      params.set("limit", String(limit));
+      params.set("offset", String(offset));
+
+      const data = await apiFetch("/api/admin/messages?" + params.toString(), { method: "GET" });
+      lastLoaded = data.results || [];
+
+      $("meta").textContent = `نمایش ${lastLoaded.length} پیام | total=${data.total} | offset=${data.offset} | limit=${data.limit}`;
+
+      const tb = $("tbody");
+      tb.innerHTML = "";
+
+      for (const m of lastLoaded) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="mono">${m.id}</td>
+          <td><span class="pill">${escapeHTML(m.room)}</span></td>
+          <td class="mono">${escapeHTML(m.username)}</td>
+          <td>
+            <div>${escapeHTML(m.text)}</div>
+            <div class="muted mono" style="margin-top:6px">created_at: ${escapeHTML(m.created_at || "")}</div>
+          </td>
+          <td class="mono">${escapeHTML(m.created_at || "")}</td>
+          <td>
+            <div class="actions">
+              <button onclick="promptEdit(${m.id}, '${jsEscape(m.room)}', '${jsEscape(m.username)}', '${jsEscape(m.text)}')">ویرایش</button>
+              <button class="danger" onclick="adminDelete(${m.id})">حذف</button>
+            </div>
+          </td>
+        `;
+        tb.appendChild(tr);
+      }
+
+      setStatus(true, "online");
+    } catch (e) {
+      setStatus(false, "offline");
+      alert("خطا: " + e.message);
+    }
+  }
+
+  async function adminAdd() {
+    try {
+      const room = $("addRoom").value.trim() || "general";
+      const username = $("addUser").value.trim() || "Admin";
+      const text = $("addText").value;
+
+      const res = await apiFetch("/api/admin/add", {
+        method: "POST",
+        body: JSON.stringify({ room, username, text }),
+      });
+
+      $("addText").value = "";
+      await loadMessages();
+      alert("اضافه شد. id=" + res.id);
+    } catch (e) {
+      alert("خطا: " + e.message);
+    }
+  }
+
+  async function adminDelete(id) {
+    if (!confirm("حذف پیام " + id + " ؟")) return;
+    try {
+      await apiFetch("/api/admin/delete", {
+        method: "POST",
+        body: JSON.stringify({ id }),
+      });
+      await loadMessages();
+    } catch (e) {
+      alert("خطا: " + e.message);
+    }
+  }
+
+  async function promptEdit(id, room, username, text) {
+    const newRoom = prompt("Room:", room);
+    if (newRoom === null) return;
+
+    const newUser = prompt("Username:", username);
+    if (newUser === null) return;
+
+    const newText = prompt("Text:", text);
+    if (newText === null) return;
+
+    try {
+      await apiFetch("/api/admin/edit", {
+        method: "POST",
+        body: JSON.stringify({ id, room: newRoom, username: newUser, text: newText }),
+      });
+      await loadMessages();
+    } catch (e) {
+      alert("خطا: " + e.message);
+    }
+  }
+
+  async function adminClearRoom() {
+    const room = $("clearRoom").value.trim();
+    if (!room) return alert("نام اتاق را بده");
+    if (!confirm(`کل پیام‌های اتاق "${room}" پاک شود؟`)) return;
+
+    try {
+      await apiFetch("/api/admin/clearRoom", {
+        method: "POST",
+        body: JSON.stringify({ room }),
+      });
+      await loadMessages();
+      alert("پاک شد.");
+    } catch (e) {
+      alert("خطا: " + e.message);
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const s = await apiFetch("/api/admin/stats", { method: "GET" });
+      const top = (s.topRooms || []).map(x => `${x.room}: ${x.c}`).join(" | ");
+      $("stats").textContent = `Total: ${s.total} | Top rooms: ${top}`;
+      setStatus(true, "online");
+    } catch (e) {
+      alert("خطا: " + e.message);
+    }
+  }
+
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(lastLoaded, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "messages-export.json";
+    a.click();
+  }
+
+  function escapeHTML(str) {
+    const p = document.createElement("p");
+    p.textContent = str ?? "";
+    return p.innerHTML;
+  }
+  function jsEscape(s) {
+    return String(s ?? "").replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/\n/g,"\\n").replace(/\r/g,"\\r");
+  }
+
+  // init
+  const auth = getAuth();
+  $("api").value = auth.api;
+  $("token").value = auth.token;
+  setStatus(!!auth.token, auth.token ? "ready" : "token?");
+</script>
+
+</body>
+</html>
