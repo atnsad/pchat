@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>اتاق چت</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+    .chat-container { width: 100%; max-width: 650px; display: flex; flex-direction: column; height: 100vh; background: #1e293b; border-left: 1px solid #334155; border-right: 1px solid #334155; }
+    
+    header { padding: 14px 18px; background: #0f172a; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+    header .status { font-size: 13px; color: #10b981; }
+    
+    .room-bar { display: flex; gap: 8px; padding: 10px 18px; background: #1e293b; border-bottom: 1px solid #334155; }
+    .room-bar input { background: #0f172a; border: 1px solid #475569; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
+    .room-bar button { background: #475569; color: #fff; border: none; padding: 0 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    
+    #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 14px; word-break: break-word; line-height: 1.5; }
+    .msg.me { align-self: flex-start; background: #2563eb; color: #fff; border-bottom-right-radius: 2px; }
+    .msg.other { align-self: flex-end; background: #334155; color: #f1f5f9; border-bottom-left-radius: 2px; }
+    .msg .meta { font-size: 11px; opacity: 0.75; margin-bottom: 4px; font-weight: bold; }
+    
+    footer { padding: 12px 16px; background: #0f172a; display: flex; gap: 8px; border-top: 1px solid #334155; }
+    footer input { flex: 1; background: #1e293b; border: 1px solid #475569; color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+    footer button { background: #2563eb; color: #fff; border: none; padding: 0 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    footer button:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+<div class="chat-container">
+  <header>
+    <div><strong>اتاق چت</strong> <span id="current-room-name" style="color: #94a3b8; font-size: 12px;">(#general)</span></div>
+    <div class="status">● آنلاین</div>
+  </header>
+
+  <div class="room-bar">
+    <input type="text" id="username-input" placeholder="نام شما" style="width: 130px;">
+    <input type="text" id="room-input" placeholder="شناسه اتاق (مثلاً secret)" style="flex: 1;">
+    <button onclick="switchRoom()">تغییر اتاق</button>
+  </div>
+
+  <div id="messages"></div>
+
+  <footer>
+    <input type="text" id="message-input" placeholder="پیام خود را بنویسید..." autocomplete="off">
+    <button onclick="sendMessage()">ارسال</button>
+  </footer>
+</div>
+
+<script>
+  // آدرس مستقیم ورکر شما
+  const API_URL = "https://pchat-db.abtin-sad1393.workers.dev";
+
+  let username = localStorage.getItem("chat_username") || "کاربر_" + Math.floor(Math.random() * 900 + 100);
+  let currentRoom = "general";
+  let lastMessageId = 0;
+
+  document.getElementById("username-input").value = username;
+  document.getElementById("room-input").value = currentRoom;
+
+  const messagesDiv = document.getElementById("messages");
+  const msgInput = document.getElementById("message-input");
+
+  msgInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendMessage();
+  });
+
+  function switchRoom() {
+    const newRoom = document.getElementById("room-input").value.trim() || "general";
+    username = document.getElementById("username-input").value.trim() || username;
+    localStorage.setItem("chat_username", username);
+
+    currentRoom = newRoom;
+    document.getElementById("current-room-name").innerText = `(#${currentRoom})`;
+    lastMessageId = 0;
+    messagesDiv.innerHTML = "";
+    fetchMessages();
+  }
+
+  function escapeHTML(str) {
+    const p = document.createElement("p");
+    p.textContent = str;
+    return p.innerHTML;
+  }
+
+  async function fetchMessages() {
+    try {
+      const res = await fetch(`${API_URL}/api/messages?room=${encodeURIComponent(currentRoom)}&after=${lastMessageId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (data.length > 0) {
+        data.forEach(msg => {
+          if (msg.id > lastMessageId) lastMessageId = msg.id;
+
+          const isMe = msg.username === username;
+          const msgEl = document.createElement("div");
+          msgEl.className = `msg ${isMe ? 'me' : 'other'}`;
+          msgEl.innerHTML = `
+            <div class="meta">${escapeHTML(msg.username)}</div>
+            <div>${escapeHTML(msg.text)}</div>
+          `;
+          messagesDiv.appendChild(msgEl);
+        });
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }
+    } catch (e) {
+      console.warn("خطا در بارگذاری پیام‌ها:", e);
+    }
+  }
+
+  async function sendMessage() {
+    const text = msgInput.value.trim();
+    if (!text) return;
+
+    username = document.getElementById("username-input").value.trim() || username;
+    localStorage.setItem("chat_username", username);
+
+    msgInput.value = "";
+
+    try {
+      await fetch(`${API_URL}/api/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room: currentRoom, username, text })
+      });
+      fetchMessages();
+    } catch (e) {
+      alert("خطا در ارسال پیام");
+    }
+  }
+
+  // شروع برنامه و به‌روزرسانی هر ۲ ثانیه
+  fetchMessages();
+  setInterval(fetchMessages, 2000);
+</script>
+
+</body>
+</html>
