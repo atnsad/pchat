@@ -2,139 +2,93 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>لایو ویس‌چت رایگان</title>
-  <!-- کتابخانه WebRTC PeerJS بدون نیاز به سرور پولی -->
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>لایو ویس‌چت</title>
+  <script src="https://meet.jit.si/external_api.js"></script>
   <style>
-    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
-    body { margin: 0; background: #0f172a; color: #f8fafc; padding: 20px; }
-    .box { max-width: 500px; margin: 30px auto; background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; }
-    input, button { width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; }
-    button { cursor: pointer; font-weight: bold; }
-    button.primary { background: #2563eb; border: none; }
-    button.danger { background: #dc2626; border: none; }
-    .status { margin-top: 15px; padding: 10px; border-radius: 6px; background: #334155; font-size: 14px; text-align: center; }
-    .user-list { margin-top: 15px; }
-    .user-tag { background: #0284c7; padding: 4px 8px; border-radius: 4px; display: inline-block; margin: 4px; font-size: 13px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .top-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      width: min(900px, 100%);
+    }
+    input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #fff;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 18px;
+      border-radius: 8px;
+      border: none;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    #meet {
+      width: min(900px, 100%);
+      height: 75vh;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
   </style>
 </head>
 <body>
 
-<div class="box">
-  <h2>🎙 لایو ویس‌چت (رایگان)</h2>
-  <div style="font-size: 13px; color: #94a3b8;">اتصال صوتی همزمان Peer-to-Peer بدون هزینه سرور</div>
-
-  <div id="join-section">
-    <input id="roomId" placeholder="شناسه اتاق (مثلا: room123)" value="chat-room-1">
-    <input id="myNick" placeholder="اسم مستعار شما" value="کاربر">
-    <button class="primary" onclick="startVoice()">ورود به ویس‌چت</button>
+  <div class="top-bar">
+    <input id="roomName" placeholder="نام اتاق صوتی (مثلاً: game-room-1)" value="my-chat-room">
+    <button onclick="joinVoice()">ورود به ویس</button>
   </div>
 
-  <div id="call-section" style="display: none;">
-    <div class="status" id="callStatus">در حال برقراری ارتباط...</div>
-    <button id="muteBtn" onclick="toggleMute()">قطع میکروفون</button>
-    <button class="danger" onclick="leaveVoice()">خروج از ویس</button>
-    
-    <div class="user-list">
-      <div>افراد داخل ویس:</div>
-      <div id="users"></div>
-    </div>
-  </div>
-</div>
+  <div id="meet"></div>
 
-<div id="audios"></div>
+  <script>
+    let api = null;
 
-<script>
-  let peer = null;
-  let localStream = null;
-  let isMuted = false;
-  let activeCalls = new Map();
+    function joinVoice() {
+      const room = document.getElementById("roomName").value.trim();
+      if (!room) return alert("نام اتاق را وارد کن");
 
-  async function startVoice() {
-    const roomId = document.getElementById("roomId").value.trim();
-    const nick = document.getElementById("myNick").value.trim();
-    if (!roomId) return alert("شناسه اتاق را وارد کن");
+      if (api) api.dispose();
 
-    try {
-      // 1. دریافت صدا از میکروفون
-      localStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: false 
-      });
+      const domain = "meet.jit.si";
+      const options = {
+        roomName: "pchat-" + room,
+        width: "100%",
+        height: "100%",
+        parentNode: document.querySelector('#meet'),
+        configOverwrite: {
+          startWithAudioMuted: false,
+          startWithVideoMuted: true, // فقط ویس، تصویر خاموش
+          prejoinPageEnabled: false
+        },
+        interfaceConfigOverwrite: {
+          TOOLBAR_BUTTONS: ['microphone', 'hangup', 'tileview']
+        }
+      };
 
-      document.getElementById("join-section").style.display = "none";
-      document.getElementById("call-section").style.display = "block";
-      document.getElementById("callStatus").textContent = "متصل شدید! در حال جستجوی هم‌اتاقی‌ها...";
-
-      // 2. ساخت ID یونیک بر اساس اسم اتاق
-      const myPeerId = `${roomId}-${Math.floor(Math.random() * 10000)}`;
-
-      // 3. اتصال به سرور رایگان سیگنالینگ PeerJS
-      peer = new Peer(myPeerId);
-
-      peer.on('open', (id) => {
-        addUserTag(nick + " (شما)");
-      });
-
-      // دریافت تماس صوتی از سایر کاربران اتاق
-      peer.on('call', (call) => {
-        call.answer(localStream); // پاسخ خودکار با صدای خودمان
-        handleStream(call);
-      });
-
-    } catch (err) {
-      alert("دسترسی به میکروفون داده نشد یا HTTPS نیست: " + err.message);
+      api = new JitsiMeetExternalAPI(domain, options);
     }
-  }
-
-  function handleStream(call) {
-    call.on('stream', (remoteStream) => {
-      if (document.getElementById(`audio-${call.peer}`)) return;
-
-      const audio = document.createElement("audio");
-      audio.id = `audio-${call.peer}`;
-      audio.srcObject = remoteStream;
-      audio.autoplay = true;
-      document.getElementById("audios").appendChild(audio);
-
-      addUserTag("کاربر " + call.peer.slice(-4));
-    });
-
-    call.on('close', () => {
-      const el = document.getElementById(`audio-${call.peer}`);
-      if (el) el.remove();
-    });
-
-    activeCalls.set(call.peer, call);
-  }
-
-  function toggleMute() {
-    if (!localStream) return;
-    isMuted = !isMuted;
-    localStream.getAudioTracks()[0].enabled = !isMuted;
-    const btn = document.getElementById("muteBtn");
-    btn.textContent = isMuted ? "وصل کردن میکروفون" : "قطع میکروفون";
-    btn.style.background = isMuted ? "#b91c1c" : "#0f172a";
-  }
-
-  function leaveVoice() {
-    if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
-    }
-    if (peer) {
-      peer.destroy();
-    }
-    location.reload();
-  }
-
-  function addUserTag(name) {
-    const span = document.createElement("span");
-    span.className = "user-tag";
-    span.textContent = name;
-    document.getElementById("users").appendChild(span);
-  }
-</script>
-
+  </script>
 </body>
 </html>
